@@ -4,114 +4,161 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
-	"github.com/robertkowalski/graylog-golang"
+	"github.com/fsnotify/fsnotify"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-type managedFiles struct {
-	sync.RWMutex
-	fileNames map[string]bool
-}
-
-func (m *managedFiles) managed(fileName string) bool {
-	m.RLock()
-	defer m.RUnlock()
-
-	if isManaged, ok := m.fileNames[fileName]; ok {
-		return isManaged
-	}
-	return false
-}
-
-func (m *managedFiles) manage(fileName string) {
-	m.Lock()
-	defer m.Unlock()
-
-	m.fileNames[fileName] = true
-}
-
-func (m *managedFiles) abandon(fileName string) {
-	m.Lock()
-	defer m.Unlock()
-
-	m.fileNames[fileName] = false
-}
-
+/**
+1. read all files in logs dir
+2. launch log parser for each file in the dir. recover from panic if it happens.
+	log parser asks k8s is it a cluster resource.
+3. inotify on file creation in the logs dir
+*/
 func main() {
-	mFiles := managedFiles{}
-	graylogChan := getGraylogChan()
-	for {
-		logFiles, err := readLogsDir()
-		if err != nil {
-			log.Fatalln(err)
-		}
+	targetLogsDir := getEnvDefault("K8S_CONTAINERS_LOGS_DIR", "/var/log/containers/")
+	if !strings.HasSuffix(targetLogsDir, "/") {
+		targetLogsDir = targetLogsDir + "/"
+	}
 
-		for _, logFile := range logFiles {
-			if !mFiles.managed(logFile) {
-				continue
+	logFiles, err := getLogFiles(targetLogsDir)
+	if err != nil {
+		log.Fatalln("error reading from logs dir", err)
+	}
+
+	for _, logFile := range logFiles {
+		go processLogs(logFile)
+	}
+
+	// watch for new files in logs dir
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer watcher.Close()
+	err = watcher.Add(targetLogsDir)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	for {
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				log.Fatalln("inotify is aborted (events chan)")
 			}
 
+			if event.Op == fsnotify.Create {
+				go processLogs(event.Name)
+			}
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				log.Fatalln("inotify is aborted (errors chan)")
+			}
+			log.Fatalln(err)
 		}
-
-		time.Sleep(1 * time.Second)
 	}
 }
 
-func readLogsDir() ([]string, error) {
-	dir := getEnvDefault("LOGS_DIR", "/var/log/containers/")
-	dirItems, err := ioutil.ReadDir(dir)
+func processLogs(logFile string) {
+	fileInfo, err := os.Stat(logFile)
+	if err != nil {
+		log.Println("err on getting log file stat:", err)
+		return
+	}
+
+	if fileInfo.IsDir() {
+		log.Println(logFile, "is a directory")
+		return
+	}
+
+	if fileInfo.Mode()&0004 == 0 {
+		log.Println(logFile, "doesn't have read permission for others")
+		return
+	}
+
+	log.Println("processing log file", logFile)
+
+	defer func() {
+		if err := recover(); err != nil {
+			log.Println("recovering from panic while processing log file", logFile, err)
+			go processLogs(logFile)
+		}
+	}()
+
+	// parse pod ns & name
+	// ask k8s if the pod has logging annotation
+	// tail logs
+	// abandon if tail is no more possible
+}
+
+func getLogFiles(targetLogsDir string) ([]string, error) {
+	dirItems, err := ioutil.ReadDir(targetLogsDir)
 	if err != nil {
 		return nil, err
 	}
 
 	var files []string
 	for _, dirItem := range dirItems {
-		if dirItem.IsDir() {
-			continue
-		}
-
-		fileName := dirItem.Name()
-		if strings.HasSuffix(fileName, ".log") {
-			files = append(files, dir+fileName)
-		}
+		files = append(files, targetLogsDir+dirItem.Name())
 	}
 	return files, nil
 }
 
-func processLogs(fileName string) {
-
+type dockerLogEntry struct {
+	Log    string    `json:"log"`
+	Stream string    `json:"stream"`
+	Time   time.Time `json:"time"`
 }
 
-func getGraylogChan() chan<- string {
-	ch := make(chan<- string, 100)
-
-	go func() {
-		graylogHost := getEnv("GRAYLOG_HOST")
-		graylogPortStr := getEnv("GRAYLOG_PORT")
-		graylogPort, err := strconv.Atoi(graylogPortStr)
-		if err != nil || graylogPort <= 0 {
-			log.Fatalln("GRAYLOG_PORT must be a positive number")
-		}
-
-		graylog := gelf.New(gelf.Config{
-			GraylogHostname: graylogHost,
-			GraylogPort:     graylogPort,
-		})
-
-		for messageToSend := range ch {
-			graylog.Log(messageToSend)
-		}
-	}()
-
-	return ch
-}
+//func processFileLogs(fileName string) {
+//	name, namespace := parseFileName(fileName)
+//	var p *pod
+//	if name != "" && namespace != "" {
+//		p, _ = getPod(name, namespace)
+//	}
+//
+//	t, err := tail.TailFile(fileName, tail.Config{Follow: true})
+//	if err != nil {
+//		// todo abandon using channel
+//	}
+//	for line := range t.Lines {
+//		entry := &dockerLogEntry{}
+//		err := json.Unmarshal([]byte(line.Text), entry)
+//		if err != nil {
+//			continue
+//		}
+//	}
+//}
+//
+//func getGraylogChan() chan<- string {
+//	ch := make(chan<- string, 100)
+//
+//	go func() {
+//		graylogHost := getEnv("GRAYLOG_HOST")
+//		graylogPortStr := getEnv("GRAYLOG_PORT")
+//		graylogPort, err := strconv.Atoi(graylogPortStr)
+//		if err != nil || graylogPort <= 0 {
+//			log.Fatalln("GRAYLOG_PORT must be a positive number")
+//		}
+//
+//		graylog := gelf.New(gelf.Config{
+//			GraylogHostname: graylogHost,
+//			GraylogPort:     graylogPort,
+//		})
+//
+//		for messageToSend := range ch {
+//			graylog.Log(messageToSend)
+//		}
+//	}()
+//
+//	return ch
+//}
 
 func getEnv(key string) string {
 	value := os.Getenv(key)
@@ -140,11 +187,9 @@ func parseFileName(fileName string) (podName, podNamespace string) {
 
 type pod struct {
 	Metadata struct {
-		Name      string `json:"name"`
-		Namespace string `json:"namespace"`
-		Labels    struct {
+		Annotations struct {
 			Logging string `json:"logging"`
-		} `json:"labels"`
+		} `json:"annotations"`
 	} `json:"metadata"`
 	Spec struct {
 		NodeName string `json:"nodeName"`
