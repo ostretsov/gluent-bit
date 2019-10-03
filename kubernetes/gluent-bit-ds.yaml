@@ -1,0 +1,36 @@
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: gluent-bit
+  namespace: logging
+  labels:
+    k8s-app: gluent-bit-logging
+    version: v1
+    kubernetes.io/cluster-service: "true"
+spec:
+  template:
+    metadata:
+      labels:
+        k8s-app: gluent-bit-logging
+        version: v1
+        kubernetes.io/cluster-service: "true"
+    spec:
+      containers:
+        - name: gluent-bit
+          image: gluent/gluent-bit:latest
+          imagePullPolicy: Always
+          env:
+            - name: gluent_ELASTICSEARCH_HOST
+              value: "elasticsearch"
+            - name: gluent_ELASTICSEARCH_PORT
+              value: "9200"
+      terminationGracePeriodSeconds: 10
+      serviceAccountName: gluent-bit
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+        - operator: "Exists"
+          effect: "NoExecute"
+        - operator: "Exists"
+          effect: "NoSchedule"

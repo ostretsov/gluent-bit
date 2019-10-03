@@ -146,7 +146,7 @@ func processLogs(logFile string) {
 			"version":       "1.1",
 			"host":          pod.Spec.NodeName,
 			"short_message": entry.Log,
-			"timestamp":     fmt.Sprintf("%.4f", float64(time.Now().UnixNano())/float64(time.Second.Nanoseconds())),
+			"timestamp":     fmt.Sprintf("%.4f", float64(entry.Time.UnixNano())/float64(time.Second.Nanoseconds())),
 		}
 		encodedMessage, err := json.Marshal(message)
 		if err != nil {
