@@ -4,23 +4,46 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"github.com/fsnotify/fsnotify"
+	"github.com/hpcloud/tail"
+	gelf "github.com/robertkowalski/graylog-golang"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
-/**
-1. read all files in logs dir
-2. launch log parser for each file in the dir. recover from panic if it happens.
-	log parser asks k8s is it a cluster resource.
-3. inotify on file creation in the logs dir
-*/
+type pod struct {
+	Metadata struct {
+		Annotations struct {
+			Logging string `json:"logging"`
+		} `json:"annotations"`
+	} `json:"metadata"`
+	Spec struct {
+		NodeName string `json:"nodeName"`
+	} `json:"spec"`
+	Status struct {
+		HostIP string `json:"hostIP"`
+		PodIP  string `json:"podIP"`
+	} `json:"status"`
+}
+
+type dockerLogEntry struct {
+	Log  string    `json:"log"`
+	Time time.Time `json:"time"`
+}
+
 func main() {
+	// make sure required vars are set
+	getEnv("KUBERNETES_SERVICE_HOST")
+	getEnv("KUBERNETES_SERVICE_PORT")
+	getEnv("GRAYLOG_HOST")
+	getEnv("GRAYLOG_PORT")
+
 	targetLogsDir := getEnvDefault("K8S_CONTAINERS_LOGS_DIR", "/var/log/containers/")
 	if !strings.HasSuffix(targetLogsDir, "/") {
 		targetLogsDir = targetLogsDir + "/"
@@ -91,10 +114,52 @@ func processLogs(logFile string) {
 		}
 	}()
 
-	// parse pod ns & name
-	// ask k8s if the pod has logging annotation
-	// tail logs
-	// abandon if tail is no more possible
+	podName, podNamespace := parseFileName(logFile)
+	if podName == "" || podNamespace == "" {
+		log.Println(logFile, "doesn't seem like a kubernetes docker log file: couldn't determine pod name and namespace")
+		return
+	}
+
+	pod, err := getPod(podName, podNamespace)
+	if err != nil {
+		panic(err)
+	}
+	if pod.Metadata.Annotations.Logging != "enabled" {
+		log.Println("logging annotation was not enabled for pod", podName, podNamespace)
+		return
+	}
+
+	t, err := tail.TailFile(logFile, tail.Config{Follow: true, MustExist: true, ReOpen: true})
+	if err != nil {
+		log.Println("tail is impossible", logFile, err)
+	}
+	graylogCh := getGraylogChan()
+	for line := range t.Lines {
+		entry := &dockerLogEntry{}
+		err := json.Unmarshal([]byte(line.Text), entry)
+		if err != nil {
+			log.Println("err on parsing docker json log line", err)
+			continue
+		}
+
+		message := map[string]string{
+			"version":       "1.1",
+			"host":          pod.Spec.NodeName,
+			"short_message": entry.Log,
+			"timestamp":     fmt.Sprintf("%.4f", float64(time.Now().UnixNano())/float64(time.Second.Nanoseconds())),
+		}
+		encodedMessage, err := json.Marshal(message)
+		if err != nil {
+			log.Println("err on preparing message for graylog", err, entry.Log)
+			continue
+		}
+
+		graylogCh <- string(encodedMessage)
+	}
+	err = t.Err()
+	if err != nil {
+		panic(err)
+	}
 }
 
 func getLogFiles(targetLogsDir string) ([]string, error) {
@@ -110,55 +175,29 @@ func getLogFiles(targetLogsDir string) ([]string, error) {
 	return files, nil
 }
 
-type dockerLogEntry struct {
-	Log    string    `json:"log"`
-	Stream string    `json:"stream"`
-	Time   time.Time `json:"time"`
-}
+func getGraylogChan() chan<- string {
+	ch := make(chan<- string, 100)
 
-//func processFileLogs(fileName string) {
-//	name, namespace := parseFileName(fileName)
-//	var p *pod
-//	if name != "" && namespace != "" {
-//		p, _ = getPod(name, namespace)
-//	}
-//
-//	t, err := tail.TailFile(fileName, tail.Config{Follow: true})
-//	if err != nil {
-//		// todo abandon using channel
-//	}
-//	for line := range t.Lines {
-//		entry := &dockerLogEntry{}
-//		err := json.Unmarshal([]byte(line.Text), entry)
-//		if err != nil {
-//			continue
-//		}
-//	}
-//}
-//
-//func getGraylogChan() chan<- string {
-//	ch := make(chan<- string, 100)
-//
-//	go func() {
-//		graylogHost := getEnv("GRAYLOG_HOST")
-//		graylogPortStr := getEnv("GRAYLOG_PORT")
-//		graylogPort, err := strconv.Atoi(graylogPortStr)
-//		if err != nil || graylogPort <= 0 {
-//			log.Fatalln("GRAYLOG_PORT must be a positive number")
-//		}
-//
-//		graylog := gelf.New(gelf.Config{
-//			GraylogHostname: graylogHost,
-//			GraylogPort:     graylogPort,
-//		})
-//
-//		for messageToSend := range ch {
-//			graylog.Log(messageToSend)
-//		}
-//	}()
-//
-//	return ch
-//}
+	graylogHost := getEnv("GRAYLOG_HOST")
+	graylogPortStr := getEnv("GRAYLOG_PORT")
+	graylogPort, err := strconv.Atoi(graylogPortStr)
+	if err != nil || graylogPort <= 0 {
+		log.Fatalln("GRAYLOG_PORT must be a positive number")
+	}
+
+	graylog := gelf.New(gelf.Config{
+		GraylogHostname: graylogHost,
+		GraylogPort:     graylogPort,
+	})
+
+	go func() {
+		for messageToSend := range ch {
+			graylog.Log(messageToSend)
+		}
+	}()
+
+	return ch
+}
 
 func getEnv(key string) string {
 	value := os.Getenv(key)
@@ -185,21 +224,6 @@ func parseFileName(fileName string) (podName, podNamespace string) {
 	return metadata[0], metadata[1]
 }
 
-type pod struct {
-	Metadata struct {
-		Annotations struct {
-			Logging string `json:"logging"`
-		} `json:"annotations"`
-	} `json:"metadata"`
-	Spec struct {
-		NodeName string `json:"nodeName"`
-	} `json:"spec"`
-	Status struct {
-		HostIP string `json:"hostIP"`
-		PodIP  string `json:"podIP"`
-	} `json:"status"`
-}
-
 func getPod(name, namespace string) (p *pod, err error) {
 	k8sHost := getEnv("KUBERNETES_SERVICE_HOST")
 	k8sPort := getEnv("KUBERNETES_SERVICE_PORT")
@@ -207,7 +231,7 @@ func getPod(name, namespace string) (p *pod, err error) {
 	tokenFile := getEnvDefault("TOKEN_FILE", "/var/run/secrets/kubernetes.io/serviceaccount/token")
 
 	caCertPool := x509.NewCertPool()
-	caCertFileContent, err := cachedCat(caCertFile)
+	caCertFileContent, err := ioutil.ReadFile(caCertFile)
 	if err != nil {
 		return
 	}
@@ -225,7 +249,7 @@ func getPod(name, namespace string) (p *pod, err error) {
 	if err != nil {
 		return
 	}
-	tokenFileContent, err := cachedCat(tokenFile)
+	tokenFileContent, err := ioutil.ReadFile(tokenFile)
 	if err != nil {
 		return
 	}
@@ -248,32 +272,4 @@ func getPod(name, namespace string) (p *pod, err error) {
 	}
 
 	return
-}
-
-type fileCache struct {
-	sync.Mutex
-	cache map[string][]byte
-}
-
-func (f *fileCache) get(fileName string) (content []byte, err error) {
-	f.Mutex.Lock()
-	defer f.Mutex.Unlock()
-
-	if content, ok := f.cache[fileName]; ok {
-		return content, nil
-	}
-
-	content, err = ioutil.ReadFile(fileName)
-	if err != nil {
-		return nil, err
-	}
-
-	f.cache[fileName] = content
-	return
-}
-
-var cache = fileCache{}
-
-func cachedCat(fileName string) ([]byte, error) {
-	return cache.get(fileName)
 }
