@@ -26,10 +26,6 @@ type pod struct {
 	Spec struct {
 		NodeName string `json:"nodeName"`
 	} `json:"spec"`
-	Status struct {
-		HostIP string `json:"hostIP"`
-		PodIP  string `json:"podIP"`
-	} `json:"status"`
 }
 
 type dockerLogEntry struct {
@@ -105,6 +101,7 @@ func processLogs(logFile string) {
 	defer func() {
 		if err := recover(); err != nil {
 			log.Println("recovering from panic while processing log file", logFile, err)
+			time.Sleep(1 * time.Second)
 			go processLogs(logFile)
 		}
 	}()
@@ -263,6 +260,7 @@ func getPod(name, namespace string) (p *pod, err error) {
 	p = &pod{}
 	err = json.Unmarshal(body, p)
 	if err != nil {
+		log.Println("response body", string(body))
 		return
 	}
 
