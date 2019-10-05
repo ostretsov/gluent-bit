@@ -176,7 +176,7 @@ func getLogFiles(targetLogsDir string) ([]string, error) {
 }
 
 func getGraylogChan() chan<- string {
-	ch := make(chan<- string, 100)
+	ch := make(chan string, 100)
 
 	graylogHost := getEnv("GRAYLOG_HOST")
 	graylogPortStr := getEnv("GRAYLOG_PORT")
