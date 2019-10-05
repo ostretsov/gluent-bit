@@ -100,11 +100,6 @@ func processLogs(logFile string) {
 		return
 	}
 
-	if fileInfo.Mode()&0004 == 0 {
-		log.Println(logFile, "doesn't have read permission for others")
-		return
-	}
-
 	log.Println("processing log file", logFile)
 
 	defer func() {
