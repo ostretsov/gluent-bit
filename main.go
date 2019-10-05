@@ -11,6 +11,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/http/httputil"
 	"os"
 	"strconv"
 	"strings"
@@ -241,6 +242,10 @@ func getPod(name, namespace string) (p *pod, err error) {
 	if err != nil {
 		return
 	}
+	requestDump, err := httputil.DumpRequest(request, true)
+	if err == nil {
+		log.Println(name, namespace, "request", string(requestDump))
+	}
 	tokenFileContent, err := ioutil.ReadFile(tokenFile)
 	if err != nil {
 		return
@@ -256,7 +261,7 @@ func getPod(name, namespace string) (p *pod, err error) {
 	if err != nil {
 		return
 	}
-	log.Println("k8s API response body", string(body))
+	log.Println(name, namespace, "response", string(body))
 
 	p = &pod{}
 	err = json.Unmarshal(body, p)
