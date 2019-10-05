@@ -8,9 +8,6 @@ FROM golang:1.13.1-alpine3.10 as builder
 # Ca-certificates is required to call HTTPS endpoints.
 RUN apk update && apk add --no-cache git ca-certificates tzdata curl && update-ca-certificates
 
-# Create appuser
-RUN adduser -D -g '' appuser
-
 WORKDIR $GOPATH/src/gluent-bit
 COPY . .
 
@@ -32,8 +29,5 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -a -installsuffix cgo -o 
 #
 ## Copy our static executable
 #COPY --from=builder /go/bin/gluent-bit /go/bin/gluent-bit
-
-# Use an unprivileged user.
-USER appuser
 
 ENTRYPOINT ["/go/bin/gluent-bit"]
