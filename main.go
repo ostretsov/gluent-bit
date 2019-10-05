@@ -256,11 +256,11 @@ func getPod(name, namespace string) (p *pod, err error) {
 	if err != nil {
 		return
 	}
+	log.Println("k8s API response body", string(body))
 
 	p = &pod{}
 	err = json.Unmarshal(body, p)
 	if err != nil {
-		log.Println("response body", string(body))
 		return
 	}
 
