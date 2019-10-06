@@ -228,6 +228,9 @@ func getPod(name, namespace string) (p *pod, err error) {
 	if err != nil {
 		return
 	}
+	if debugMode() {
+		log.Println("ca cert file content", caCertFileContent)
+	}
 	caCertPool.AppendCertsFromPEM(caCertFileContent)
 
 	client := &http.Client{
@@ -242,13 +245,19 @@ func getPod(name, namespace string) (p *pod, err error) {
 	if err != nil {
 		return
 	}
-	requestDump, err := httputil.DumpRequest(request, true)
-	if err == nil {
-		log.Println(name, namespace, "request", string(requestDump))
+	if debugMode() {
+		requestDump, err := httputil.DumpRequest(request, true)
+		if err == nil {
+			log.Println(name, namespace, "request")
+			log.Println(string(requestDump))
+		}
 	}
 	tokenFileContent, err := ioutil.ReadFile(tokenFile)
 	if err != nil {
 		return
+	}
+	if debugMode() {
+		log.Println("token file content", tokenFileContent)
 	}
 	request.Header.Add("Authorization", "Bearer: "+string(tokenFileContent))
 	response, err := client.Do(request)
@@ -257,11 +266,18 @@ func getPod(name, namespace string) (p *pod, err error) {
 	}
 	defer response.Body.Close()
 
+	if debugMode() {
+		responseDump, err := httputil.DumpResponse(response, true)
+		if err == nil {
+			log.Println(name, namespace, "response")
+			log.Println(string(responseDump))
+		}
+	}
+
 	body, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		return
 	}
-	log.Println(name, namespace, "response", string(body))
 
 	p = &pod{}
 	err = json.Unmarshal(body, p)
@@ -270,4 +286,9 @@ func getPod(name, namespace string) (p *pod, err error) {
 	}
 
 	return
+}
+
+func debugMode() bool {
+	debug := getEnvDefault("DEBUG", "false")
+	return debug == "true"
 }
