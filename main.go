@@ -139,6 +139,8 @@ func processLogs(logFile string) {
 		message := map[string]string{
 			"version":       "1.1",
 			"host":          pod.Spec.NodeName,
+			"pod_name":      podName,
+			"pod_namespace": podNamespace,
 			"short_message": entry.Log,
 			"timestamp":     fmt.Sprintf("%.4f", float64(entry.Time.UnixNano())/float64(time.Second.Nanoseconds())),
 		}
