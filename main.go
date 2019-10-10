@@ -229,7 +229,7 @@ func getPod(name, namespace string) (p *pod, err error) {
 		return
 	}
 	if debugMode() {
-		log.Println("ca cert file content", caCertFileContent)
+		log.Println("ca cert file content", string(caCertFileContent))
 	}
 	caCertPool.AppendCertsFromPEM(caCertFileContent)
 
@@ -241,10 +241,19 @@ func getPod(name, namespace string) (p *pod, err error) {
 		},
 	}
 
-	request, err := http.NewRequest("GET", "https://"+k8sHost+":"+k8sPort, nil)
+	podDetailsUrl := fmt.Sprintf("https://%s:%s/api/v1/namespaces/%s/pods/%s", k8sHost, k8sPort, namespace, name)
+	request, err := http.NewRequest("GET", podDetailsUrl, nil)
 	if err != nil {
 		return
 	}
+	tokenFileContent, err := ioutil.ReadFile(tokenFile)
+	if err != nil {
+		return
+	}
+	if debugMode() {
+		log.Println("token file content", string(tokenFileContent))
+	}
+	request.Header.Add("Authorization", "Bearer "+string(tokenFileContent))
 	if debugMode() {
 		requestDump, err := httputil.DumpRequest(request, true)
 		if err == nil {
@@ -252,14 +261,6 @@ func getPod(name, namespace string) (p *pod, err error) {
 			log.Println(string(requestDump))
 		}
 	}
-	tokenFileContent, err := ioutil.ReadFile(tokenFile)
-	if err != nil {
-		return
-	}
-	if debugMode() {
-		log.Println("token file content", tokenFileContent)
-	}
-	request.Header.Add("Authorization", "Bearer: "+string(tokenFileContent))
 	response, err := client.Do(request)
 	if err != nil {
 		return

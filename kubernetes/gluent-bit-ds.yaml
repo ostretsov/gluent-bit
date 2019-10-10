@@ -24,6 +24,8 @@ spec:
             value: "graylog.graylog.svc.cluster.local"  # CHANGE IF DIFFERENT !
           - name: GRAYLOG_PORT
             value: "12201"                              # CHANGE IF DIFFERENT !
+          - name: DEBUG                                 # UNCOMMENT IF THERE ARE PROBLEMS
+            value: "true"
           volumeMounts:
           - name: varlog
             mountPath: /var/log
