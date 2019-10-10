@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -209,6 +210,7 @@ func getEnvDefault(key, defaultValue string) string {
 }
 
 func parseFileName(fileName string) (podName, podNamespace string) {
+	fileName = filepath.Base(fileName)
 	metadata := strings.Split(fileName, "_")
 	if len(metadata) < 3 {
 		return "", ""
