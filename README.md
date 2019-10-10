@@ -21,7 +21,7 @@ All you need then is to annotate a pod with `logging: "enabled"` and get logs fo
 You could check if `gluent-bit` works:
 ```shell script
 $ kubectl create namespace debug
-$ # the following pod write text in stdout every 5 seconds
+$ # the following pod writes "log text" to STDOUT every 5 seconds
 $ kubectl apply -f https://raw.githubusercontent.com/ostretsov/gluent-bit/master/kubernetes/debug-infinite-log.yaml
 $ # check if logs are in Graylog
 $ # if everything is working delete debug namespace
