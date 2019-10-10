@@ -1,0 +1,13 @@
+kind: Pod
+apiVersion: v1
+metadata:
+  name: infinite-log
+  namespace: debug
+  annotations:
+    logging: "enabled"
+spec:
+  containers:
+    - name: infinite-log
+      image: ubuntu
+      command: ["/bin/bash", "-ec", "while :; do echo 'log text'; sleep 5 ; done"]
+  restartPolicy: Never
