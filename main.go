@@ -124,7 +124,15 @@ func processLogs(logFile string) {
 		return
 	}
 
-	t, err := tail.TailFile(logFile, tail.Config{Follow: true, MustExist: true, Location: &tail.SeekInfo{0, io.SeekEnd}})
+	t, err := tail.TailFile(
+		logFile,
+		tail.Config{
+			Poll:      true,
+			Follow:    true,
+			MustExist: true,
+			Location:  &tail.SeekInfo{0, io.SeekEnd},
+		},
+	)
 	if err != nil {
 		log.Println("tail is impossible", logFile, err)
 	}
