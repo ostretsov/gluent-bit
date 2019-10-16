@@ -8,6 +8,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/hpcloud/tail"
 	gelf "github.com/robertkowalski/graylog-golang"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -123,7 +124,7 @@ func processLogs(logFile string) {
 		return
 	}
 
-	t, err := tail.TailFile(logFile, tail.Config{Follow: true, MustExist: true, ReOpen: true})
+	t, err := tail.TailFile(logFile, tail.Config{Follow: true, MustExist: true, Location: &tail.SeekInfo{0, io.SeekEnd}})
 	if err != nil {
 		log.Println("tail is impossible", logFile, err)
 	}
