@@ -111,7 +111,7 @@ func processLogs(logFile string) {
 
 	podName, podNamespace := parseFileName(logFile)
 	if podName == "" || podNamespace == "" {
-		log.Println(logFile, "doesn't seem like a kubernetes docker log file: couldn't determine pod name and namespace")
+		log.Println(logFile, "doesn't seem like a kubernetes docker log file: couldn't determine pod name or namespace")
 		return
 	}
 
@@ -120,7 +120,7 @@ func processLogs(logFile string) {
 		panic(err)
 	}
 	if pod.Metadata.Annotations.Logging != "enabled" {
-		log.Println("logging annotation was not enabled for pod", podName, podNamespace)
+		log.Println("logging annotation was not enabled for the pod", podName, podNamespace)
 		return
 	}
 
